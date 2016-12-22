@@ -52,11 +52,26 @@ define mountt::mount (
   }
 
   if ($mount == true) {
-    mountpoint { $name:
-      ensure   => $_mount_ensure,
-      device   => $device,
-      options  => $options,
-      remounts => $remounts,
+    # Puppet mount provider is not aware of LABEL/UUID
+    # For now i feel it's not safe to use it so this is a nasty workaround
+    if ($_mount_ensure == 'present') {
+      $_options = join($options, ',')
+      if ($_options != '') {
+        $_mount_options = "-o ${_options}"
+      } else {
+        $_mount_options = undef
+      }
+      exec { "mountt_mount_${name}":
+        command => "mount -t ${fstype} ${device} ${name} ${_mount_options}",
+        path    => "/sbin:/usr/sbin:/bin:/usr/bin",
+        unless  => "cat /proc/mounts | grep ${name} | awk {'print \$2'} | grep -q ^${name}\$",
+      }
+    } elsif ($_mount_ensure == 'absent') {
+      exec { "mountt_umount_${name}":
+        command => "umount ${name}",
+        path    => "/sbin:/usr/sbin:/bin:/usr/bin",
+        onlyif  => "cat /proc/mounts | grep ${name} | awk {'print \$2'} | grep -q ^${name}\$",
+      }
     }
   }
 }
