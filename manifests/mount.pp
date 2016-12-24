@@ -11,7 +11,8 @@ define mountt::mount (
   $provider         = 'augeas',
   $device           = undef,
   $fstype           = undef,
-  $options          = []
+  $options          = [],
+  $dir_ensure       = false,
 ) {
 
   validate_absolute_path($name)
@@ -25,6 +26,7 @@ define mountt::mount (
   validate_string($device)
   validate_string($fstype)
   validate_array($options)
+  validate_bool($dir_ensure)
 
   $_mounttab_ensure = $mounttab_ensure ? {
     undef   => $ensure,
@@ -38,6 +40,17 @@ define mountt::mount (
   }
   validate_re($_mount_ensure, '^(present|absent)$')
 
+  anchor { "mountt::mount::${name}::begin": }
+  anchor { "mountt::mount::${name}::end": }
+
+  if ($dir_ensure == true) {
+    exec { "mkdir_${name}":
+      command => "/bin/mkdir -p ${name}",
+      unless  => "/bin/ls $(dirname ${name}) 2> /dev/null | /bin/grep -q ^$(basename ${name})\$",
+      require => Anchor["mountt::mount::${name}::begin"],
+    }
+  }
+
   if ($mounttab == true) {
     mounttab { $name:
       ensure   => $_mounttab_ensure,
@@ -48,12 +61,13 @@ define mountt::mount (
       pass     => $pass,
       atboot   => $atboot,
       provider => $provider,
+      before   => Anchor["mountt::mount::${name}::end"]
     }
   }
 
   if ($mount == true) {
-    # Puppet mount provider is not aware of LABEL/UUID
-    # For now i feel it's not safe to use it so this is a nasty workaround
+  # Puppet mount provider is not aware of LABEL/UUID
+  # For now i feel it's not safe to use it so this is a nasty workaround
     if ($_mount_ensure == 'present') {
       $_options = join($options, ',')
       if ($_options != '') {
@@ -65,6 +79,7 @@ define mountt::mount (
         command => "mount -t ${fstype} ${device} ${name} ${_mount_options}",
         path    => "/sbin:/usr/sbin:/bin:/usr/bin",
         unless  => "cat /proc/mounts | grep ${name} | awk {'print \$2'} | grep -q ^${name}\$",
+        before  => Anchor["mountt::mount::${name}::end"],
       }
     } elsif ($_mount_ensure == 'absent') {
       exec { "mountt_umount_${name}":
